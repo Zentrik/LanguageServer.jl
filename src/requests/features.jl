@@ -1,4 +1,8 @@
-
+function g(x)
+    y = x + 1
+    z = 2 * y
+    return z
+end
 
 # TODO: should be in StaticLint. visited check is costly.
 resolve_shadow_binding(b) = b
@@ -536,7 +540,127 @@ function textDocument_inlayHint_request(params::InlayHintParams, server::Languag
 
     start, stop = get_offset(doc, params.range.start), get_offset(doc, params.range.stop)
 
-    return collect_inlay_hints(getcst(doc), server, doc, start, stop)
+    @info "uri: " params.textDocument.uri
+    @info "doc: " doc
+    hints = collect_inlay_hints_cthulhu(getcst(doc), server, doc, start, stop)
+    return collect_inlay_hints(getcst(doc), server, doc, start, stop, 0, hints)
+end
+
+using TypedSyntax: gettyp, ndigits_linenumbers, get_function_def, first_byte, type_annotation_mode, catchup, show_annotation, last_byte, is_function_def, children, MaybeTypedSyntaxNode, haschildren, source_line, source_location
+import TypedSyntax: show_annotation, show_src_expr
+
+function collect_inlay_hints_cthulhu(x::EXPR, server::LanguageServerInstance, doc, start, stop, pos=0, hints=InlayHint[])
+    @info "x: " x
+
+    # @info "parsed: " JuliaSyntax.parse!(SourceFile(get_text(first(getdocuments_value(server, params.textDocument.uri)))))
+
+    # for b in x, a in b
+    #     if a isa EXPR && CSTParser.ismacroname(a)
+    #     @info "a: " a.val
+    #         # @info "sig: " CSTParser.get_sig(a)
+    #         # @info "macro: " CSTParser.parse_macrocall(a)
+    #         # @info "parent: " parentof(a)
+    #         # @info "parent parent: " parentof(parentof(a))
+    #         if CSTParser.get_name(a) == "@annotate_types"
+    #             @info "selected: " a
+    #             @info "selected call: " parentof(a)[3]
+    #             @info "selected call: " parentof(a)[3].args[1]
+    #             @info "selected call: " parentof(a)[3].args[1]
+    #         end
+    #     end
+    # end
+    rootnode = TypedSyntaxNode(g, (Float64,))
+
+    @info "rootnode:" rootnode
+
+    type_annotations = true
+    with_linenumber = true
+    hide_type_stable = false
+    iswarn = true
+    idxend = last_byte(rootnode)
+
+    rt = gettyp(rootnode)
+    nd = with_linenumber ? ndigits_linenumbers(rootnode, idxend) : 0
+    rootnode = get_function_def(rootnode)
+    position = first_byte(rootnode) - 1
+    # with_linenumber && print_linenumber(io, rootnode, position + 1, nd)
+    if is_function_def(rootnode)
+        # We're printing a MethodInstance
+        @assert length(children(rootnode)) == 2
+        sig, body = children(rootnode)
+        type_annotate, pre, pre2, post = type_annotation_mode(sig, rt; type_annotations, hide_type_stable)
+        position = show_src_expr(hints, sig, position, pre, pre2; type_annotations, iswarn, hide_type_stable, nd)
+        type_annotate && show_annotation(hints, rt, nd, position, post; iswarn)
+        rootnode = body
+    end
+    position = show_src_expr(hints, rootnode, position, "", ""; type_annotations, iswarn, hide_type_stable, nd)
+
+    @info "hints: " hints
+    return hints
+end
+
+function show_annotation(hints, @nospecialize(T), line, column, post=""; iswarn::Bool)
+    push!(
+        hints,
+        InlayHint(
+            Position(line-1, column),
+            string(post, "::", T),
+            InlayHintKinds.Type,
+            missing,
+            missing,
+            missing,
+            missing,
+            missing
+        )
+    )
+end
+
+function show_src_expr(hints, node::MaybeTypedSyntaxNode, position::Int, pre::String, pre2::String; type_annotations::Bool=true, iswarn::Bool=false, hide_type_stable::Bool=false, nd::Int)
+    _lastidx = last_byte(node)
+    position = catchup(devnull, node, position, nd)
+    if haschildren(node)
+        cs = children(node)
+        if !isempty(cs)   # `haschildren(node)` returns `true` as long as the node has the *capacity* to store children
+            position = catchup(devnull, first(children(node)), position, nd)
+        end
+    end
+    if !isempty(pre)
+        push!(
+            hints,
+            InlayHint(
+                Position((source_location(node.source, position) .- (1, 0))...),
+                pre,
+                InlayHintKinds.Type,
+                missing,
+                missing,
+                missing,
+                missing,
+                missing
+            )
+        )
+    end
+    for (i, child) in enumerate(children(node))
+        i == 2 && if !isempty(pre2)
+            push!(
+                hints,
+                InlayHint(
+                    Position((source_location(node.source, position) .- (1, 0))...),
+                    pre2,
+                    InlayHintKinds.Type,
+                    missing,
+                    missing,
+                    missing,
+                    missing,
+                    missing
+                )
+            )
+        end
+        cT = gettyp(child)
+        ctype_annotate, cpre, cpre2, cpost = TypedSyntax.type_annotation_mode(child, cT; type_annotations, hide_type_stable)
+        position = show_src_expr(hints, child, position, cpre, cpre2; type_annotations, iswarn, hide_type_stable, nd)
+        ctype_annotate && show_annotation(hints, cT, source_location(child.source, position)..., cpost; iswarn)
+    end
+    return catchup(devnull, node, position, nd, _lastidx+1)
 end
 
 function collect_inlay_hints(x::EXPR, server::LanguageServerInstance, doc, start, stop, pos=0, hints=InlayHint[])

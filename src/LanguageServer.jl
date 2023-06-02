@@ -8,6 +8,7 @@ import JSONRPC
 using JSONRPC: Outbound, @dict_readable
 import TestItemDetection
 using PrecompileTools
+using TypedSyntax
 
 export LanguageServerInstance, runserver
 
