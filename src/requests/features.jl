@@ -540,14 +540,14 @@ function textDocument_inlayHint_request(params::InlayHintParams, server::Languag
 
     start, stop = get_offset(doc, params.range.start), get_offset(doc, params.range.stop)
 
-    hints = collect_inlay_hints_cthulhu(getcst(doc), server, doc, start, stop)
+    hints = InlayHint[]
+    @static if VERSION >= v"1.6"
+        collect_inlay_hints_cthulhu!(hints, getcst(doc), server, doc, start, stop)
+    end
     return collect_inlay_hints(getcst(doc), server, doc, start, stop, 0, hints)
 end
 
-using TypedSyntax: gettyp, ndigits_linenumbers, get_function_def, first_byte, type_annotation_mode, catchup, show_annotation, last_byte, is_function_def, children, MaybeTypedSyntaxNode, haschildren, source_line, source_location
-import TypedSyntax: show_annotation, show_src_expr
-
-function collect_inlay_hints_cthulhu(x::EXPR, server::LanguageServerInstance, doc, start, stop, pos=0, hints=InlayHint[])
+function collect_inlay_hints_cthulhu!(hints, x::EXPR, server::LanguageServerInstance, doc, start, stop, pos=0)
     rootnode = TypedSyntaxNode(g, (Float64,))
 
     show_inlay_hints!(hints, rootnode)

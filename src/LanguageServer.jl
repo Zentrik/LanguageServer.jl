@@ -8,7 +8,12 @@ import JSONRPC
 using JSONRPC: Outbound, @dict_readable
 import TestItemDetection
 using PrecompileTools
-using TypedSyntax
+
+@static if VERSION >= v"1.6"
+    using TypedSyntax
+    using TypedSyntax: gettyp, ndigits_linenumbers, get_function_def, first_byte, type_annotation_mode, catchup, show_annotation, last_byte, is_function_def, children, MaybeTypedSyntaxNode, haschildren, source_line, source_location
+    import TypedSyntax: show_annotation, show_src_expr
+end
 
 export LanguageServerInstance, runserver
 
